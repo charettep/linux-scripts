@@ -273,12 +273,60 @@ else
             echo "              To log in manually: nordvpn login --token YOUR_TOKEN_HERE"
         fi
 
-        echo "[NordVPN 8/8] Enabling meshnet..."
+        echo "[NordVPN 8/10] Enabling meshnet..."
         if [ -n "${NORDVPN_TOKEN:-}" ]; then
             sudo -u "$USER" bash -c "nordvpn set meshnet on"
-            echo "              Meshnet enabled."
+            echo "               Meshnet enabled."
         else
-            echo "              Skipping (not logged in)."
+            echo "               Skipping (not logged in)."
+        fi
+
+        echo "[NordVPN 9/10] Setting meshnet machine nickname..."
+        if [ -n "${NORDVPN_TOKEN:-}" ]; then
+            read -rp "  Enter a nickname for this machine on meshnet: " mesh_nickname </dev/tty
+            if [ -n "$mesh_nickname" ]; then
+                # NordVPN uses the system hostname as the meshnet identifier
+                sudo hostnamectl set-hostname "$mesh_nickname" 2>/dev/null || \
+                    echo "$mesh_nickname" | sudo tee /etc/hostname > /dev/null
+                # Keep /etc/hosts consistent
+                sudo sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$mesh_nickname/" /etc/hosts 2>/dev/null || \
+                    echo -e "127.0.1.1\t$mesh_nickname" | sudo tee -a /etc/hosts > /dev/null
+                echo "               Hostname set to: $mesh_nickname"
+            else
+                echo "               No nickname entered, skipping."
+            fi
+        else
+            echo "               Skipping (not logged in)."
+        fi
+
+        echo "[NordVPN 10/10] Configuring meshnet peer permissions..."
+        if [ -n "${NORDVPN_TOKEN:-}" ]; then
+            read -rp "  Allow all meshnet peer settings for all detected peers? (Y/n): " mesh_peers_answer </dev/tty
+            mesh_peers_answer="${mesh_peers_answer:-Y}"
+
+            if [[ "$mesh_peers_answer" =~ ^[Yy]$ ]]; then
+                # Fetch peer hostnames from meshnet
+                peer_list=$(sudo -u "$USER" bash -c "nordvpn meshnet peer list 2>/dev/null" \
+                    | grep -E "^Hostname:" | awk '{print $2}')
+
+                if [ -z "$peer_list" ]; then
+                    echo "               No peers found on meshnet yet."
+                    echo "               Re-run after other devices have joined meshnet."
+                else
+                    while IFS= read -r peer; do
+                        echo "               Enabling all permissions for: $peer"
+                        sudo -u "$USER" bash -c "nordvpn meshnet peer incoming allow $peer" 2>/dev/null || true
+                        sudo -u "$USER" bash -c "nordvpn meshnet peer routing allow $peer"  2>/dev/null || true
+                        sudo -u "$USER" bash -c "nordvpn meshnet peer local allow $peer"    2>/dev/null || true
+                        sudo -u "$USER" bash -c "nordvpn meshnet peer fileshare allow $peer" 2>/dev/null || true
+                    done <<< "$peer_list"
+                    echo "               All peer permissions applied."
+                fi
+            else
+                echo "               Skipping peer permissions."
+            fi
+        else
+            echo "               Skipping (not logged in)."
         fi
 
         echo ""
