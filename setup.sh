@@ -138,7 +138,7 @@ wait
 if command -v cloudflared &>/dev/null; then
     echo "[10-13/16] cloudflared already installed, skipping."
 else
-    read -rp "Install cloudflared? (Y/n): " cloudflared_answer
+    read -rp "Install cloudflared? (Y/n): " cloudflared_answer </dev/tty
     cloudflared_answer="${cloudflared_answer:-Y}"
 
     if [[ "$cloudflared_answer" =~ ^[Yy]$ ]]; then
@@ -204,7 +204,7 @@ echo ""
 if command -v nordvpn &>/dev/null; then
     echo "NordVPN already installed, skipping."
 else
-    read -rp "Install NordVPN? (Y/n): " nordvpn_answer
+    read -rp "Install NordVPN? (Y/n): " nordvpn_answer </dev/tty
     nordvpn_answer="${nordvpn_answer:-Y}"
 
     if [[ "$nordvpn_answer" =~ ^[Yy]$ ]]; then
@@ -255,7 +255,7 @@ echo ""
 if command -v sshd &>/dev/null && (systemctl is-active ssh &>/dev/null 2>&1 || pgrep sshd &>/dev/null); then
     echo "SSH server already running, skipping."
 else
-    read -rp "Set up SSH server? (Y/n): " ssh_answer
+    read -rp "Set up SSH server? (Y/n): " ssh_answer </dev/tty
     ssh_answer="${ssh_answer:-Y}"
 
     if [[ "$ssh_answer" =~ ^[Yy]$ ]]; then
