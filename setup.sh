@@ -6,7 +6,6 @@ export DEBIAN_FRONTEND=noninteractive
 # ─── Android Linux VM Detection & Fixes ──────────────────────────────────────
 
 is_android_vm() {
-    # Detect Android Linux VM (e.g. AVF/crosvm on Pixel devices)
     grep -qi "android" /proc/version 2>/dev/null && return 0
     [ -f /system/build.prop ] && return 0
     command -v getprop &>/dev/null && return 0
@@ -29,19 +28,27 @@ if is_android_vm; then
     fi
 
     echo "  [android 2/3] Disabling IPv6 persistently..."
-    sudo tee /etc/sysctl.d/99-disable-ipv6.conf > /dev/null <<'EOF'
+    if ! grep -q "disable_ipv6 = 1" /etc/sysctl.d/99-disable-ipv6.conf 2>/dev/null; then
+        sudo tee /etc/sysctl.d/99-disable-ipv6.conf > /dev/null <<'EOF'
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
-    sudo sysctl --system -q
-    echo "                IPv6 disabled."
+        sudo sysctl --system -q
+        echo "                IPv6 disabled."
+    else
+        echo "                IPv6 already disabled, skipping."
+    fi
 
     echo "  [android 3/3] Enforcing IPv4 only in apt..."
-    sudo tee /etc/apt/apt.conf.d/99force-ipv4 > /dev/null <<'EOF'
+    if [ ! -f /etc/apt/apt.conf.d/99force-ipv4 ]; then
+        sudo tee /etc/apt/apt.conf.d/99force-ipv4 > /dev/null <<'EOF'
 Acquire::ForceIPv4 "true";
 EOF
-    echo "                apt forced to IPv4."
+        echo "                apt forced to IPv4."
+    else
+        echo "                apt IPv4 already enforced, skipping."
+    fi
 
     echo "Android VM fixes applied."
     echo ""
@@ -51,7 +58,6 @@ fi
 
 echo "Checking for stale apt sources..."
 
-# NordVPN repo: remove if source list exists but keyring is missing or unreadable
 if [ -f /etc/apt/sources.list.d/nordvpn.list ]; then
     if ! gpg --no-default-keyring \
              --keyring /usr/share/keyrings/nordvpn-keyring.gpg \
@@ -77,20 +83,42 @@ echo "[3/16] apt full-upgrade..."
 sudo apt full-upgrade -y
 wait
 
-echo "[4/16] apt install packages..."
-sudo apt install -y python3-full python-is-python3 build-essential curl wget git
+echo "[4/16] Installing base packages..."
+MISSING_PKGS=()
+for pkg in python3-full python-is-python3 build-essential curl wget git; do
+    dpkg -s "$pkg" &>/dev/null || MISSING_PKGS+=("$pkg")
+done
+if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+    sudo apt install -y "${MISSING_PKGS[@]}"
+else
+    echo "      All base packages already installed, skipping."
+fi
 wait
 
 echo "[5/16] git config user.name..."
-git config --global user.name "charettep"
+current_name=$(git config --global user.name 2>/dev/null || true)
+if [ "$current_name" != "charettep" ]; then
+    git config --global user.name "charettep"
+else
+    echo "      Already set, skipping."
+fi
 wait
 
 echo "[6/16] git config user.email..."
-git config --global user.email "git@charettep.com"
+current_email=$(git config --global user.email 2>/dev/null || true)
+if [ "$current_email" != "git@charettep.com" ]; then
+    git config --global user.email "git@charettep.com"
+else
+    echo "      Already set, skipping."
+fi
 wait
 
 echo "[7/16] Installing nvm..."
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+if [ ! -d "$HOME/.nvm" ]; then
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+else
+    echo "      nvm already installed, skipping."
+fi
 wait
 
 echo "[8/16] Loading nvm into current session..."
@@ -100,7 +128,11 @@ export NVM_DIR="$HOME/.nvm"
 wait
 
 echo "[9/16] Installing latest Node.js via nvm..."
-nvm install node
+if ! command -v node &>/dev/null; then
+    nvm install node
+else
+    echo "      Node.js already installed ($(node -v)), skipping."
+fi
 wait
 
 if command -v cloudflared &>/dev/null; then
@@ -115,11 +147,19 @@ else
         wait
 
         echo "[11/16] Adding Cloudflare GPG key..."
-        curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+        if [ ! -f /usr/share/keyrings/cloudflare-main.gpg ]; then
+            curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+        else
+            echo "      Cloudflare GPG key already present, skipping."
+        fi
         wait
 
         echo "[12/16] Adding Cloudflare apt repository..."
-        echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
+        if [ ! -f /etc/apt/sources.list.d/cloudflared.list ]; then
+            echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
+        else
+            echo "      Cloudflare repo already present, skipping."
+        fi
         wait
 
         echo "[13/16] Installing cloudflared..."
@@ -133,137 +173,158 @@ else
 fi
 
 echo "[14/16] Installing Claude Code..."
-curl -fsSL https://claude.ai/install.sh | bash
+if ! command -v claude &>/dev/null; then
+    curl -fsSL https://claude.ai/install.sh | bash
+else
+    echo "      Claude Code already installed, skipping."
+fi
 wait
 
 echo "[15/16] Adding ~/.local/bin to PATH..."
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    echo "      Added to ~/.bashrc."
+else
+    echo "      Already in ~/.bashrc, skipping."
+fi
 export PATH="$HOME/.local/bin:$PATH"
 wait
 
 echo "[16/16] Installing Codex CLI..."
-npm i -g @openai/codex
+if ! command -v codex &>/dev/null; then
+    npm i -g @openai/codex
+else
+    echo "      Codex CLI already installed, skipping."
+fi
 wait
 
 # ─── NordVPN (optional) ───────────────────────────────────────────────────────
 
 echo ""
-read -rp "Install NordVPN? (Y/n): " nordvpn_answer
-nordvpn_answer="${nordvpn_answer:-Y}"
+if command -v nordvpn &>/dev/null; then
+    echo "NordVPN already installed, skipping."
+else
+    read -rp "Install NordVPN? (Y/n): " nordvpn_answer
+    nordvpn_answer="${nordvpn_answer:-Y}"
 
-if [[ "$nordvpn_answer" =~ ^[Yy]$ ]]; then
-    echo ""
-    echo "[NordVPN 1/4] Adding GPG key..."
-    if [ ! -f /usr/share/keyrings/nordvpn-keyring.gpg ]; then
-        curl -s https://repo.nordvpn.com/gpg/nordvpn_public.asc | gpg --dearmor | sudo tee /usr/share/keyrings/nordvpn-keyring.gpg > /dev/null
-        echo "              GPG key added."
-    else
-        echo "              GPG key already present, skipping."
-    fi
+    if [[ "$nordvpn_answer" =~ ^[Yy]$ ]]; then
+        echo ""
+        echo "[NordVPN 1/4] Adding GPG key..."
+        if [ ! -f /usr/share/keyrings/nordvpn-keyring.gpg ]; then
+            curl -s https://repo.nordvpn.com/gpg/nordvpn_public.asc | gpg --dearmor | sudo tee /usr/share/keyrings/nordvpn-keyring.gpg > /dev/null
+            echo "              GPG key added."
+        else
+            echo "              GPG key already present, skipping."
+        fi
 
-    echo "[NordVPN 2/4] Adding repository..."
-    if [ ! -f /etc/apt/sources.list.d/nordvpn.list ]; then
-        echo "deb [signed-by=/usr/share/keyrings/nordvpn-keyring.gpg] https://repo.nordvpn.com/deb/nordvpn/debian stable main" | sudo tee /etc/apt/sources.list.d/nordvpn.list
-        echo "              Repository added."
-    else
-        echo "              Repository already present, skipping."
-    fi
+        echo "[NordVPN 2/4] Adding repository..."
+        if [ ! -f /etc/apt/sources.list.d/nordvpn.list ]; then
+            echo "deb [signed-by=/usr/share/keyrings/nordvpn-keyring.gpg] https://repo.nordvpn.com/deb/nordvpn/debian stable main" | sudo tee /etc/apt/sources.list.d/nordvpn.list
+            echo "              Repository added."
+        else
+            echo "              Repository already present, skipping."
+        fi
 
-    echo "[NordVPN 3/4] Installing NordVPN..."
-    if ! command -v nordvpn &>/dev/null; then
+        echo "[NordVPN 3/4] Installing NordVPN..."
         sudo apt-get update -q
         sudo apt-get install -y nordvpn
         echo "              NordVPN installed."
-    else
-        echo "              NordVPN already installed, skipping."
-    fi
 
-    echo "[NordVPN 4/4] Adding user to nordvpn group..."
-    if ! groups "$USER" | grep -q nordvpn; then
-        sudo usermod -aG nordvpn "$USER"
-        echo "              User added to nordvpn group."
-    else
-        echo "              User already in nordvpn group, skipping."
-    fi
+        echo "[NordVPN 4/4] Adding user to nordvpn group..."
+        if ! groups "$USER" | grep -q nordvpn; then
+            sudo usermod -aG nordvpn "$USER"
+            echo "              User added to nordvpn group."
+        else
+            echo "              User already in nordvpn group, skipping."
+        fi
 
-    echo ""
-    echo "NordVPN ready. To log in:"
-    echo "  nordvpn login --token YOUR_TOKEN_HERE"
-    echo ""
-    echo "NOTE: nordvpn group will be active in new shell sessions."
-    echo "      To activate it now without logging out, run: newgrp nordvpn"
-else
-    echo "Skipping NordVPN."
+        echo ""
+        echo "NordVPN ready. To log in:"
+        echo "  nordvpn login --token YOUR_TOKEN_HERE"
+        echo ""
+        echo "NOTE: nordvpn group will be active in new shell sessions."
+        echo "      To activate it now without logging out, run: newgrp nordvpn"
+    else
+        echo "Skipping NordVPN."
+    fi
 fi
 
 # ─── SSH Server (optional) ────────────────────────────────────────────────────
 
 echo ""
-read -rp "Set up SSH server? (Y/n): " ssh_answer
-ssh_answer="${ssh_answer:-Y}"
-
-if [[ "$ssh_answer" =~ ^[Yy]$ ]]; then
-    USERNAME="${SUDO_USER:-${USER:-$(logname 2>/dev/null || whoami)}}"
-    if [ "$USERNAME" = "root" ]; then
-        echo "ERROR: Cannot detect target user. Run via sudo from your user account."
-        exit 1
-    fi
-
-    SSH_DIR="/home/$USERNAME/.ssh"
-    AUTH_KEYS="$SSH_DIR/authorized_keys"
-
-    echo ""
-    echo "[SSH 1/6] Installing openssh-server..."
-    sudo apt-get update -qq
-    sudo apt-get install -y openssh-server
-
-    echo "[SSH 2/6] Enabling and starting SSH service..."
-    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
-        sudo systemctl enable ssh
-        sudo systemctl start ssh
-    else
-        sudo service ssh start 2>/dev/null || sudo sshd &
-    fi
-
-    echo "[SSH 3/6] Ensuring PasswordAuthentication is enabled..."
-    CLOUDINIT_CONF="/etc/ssh/sshd_config.d/50-cloud-init.conf"
-    if [ -f "$CLOUDINIT_CONF" ]; then
-        sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' "$CLOUDINIT_CONF"
-    fi
-    grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || \
-        sudo sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication yes' /etc/ssh/sshd_config
-
-    echo "[SSH 4/6] Ensuring PubkeyAuthentication is enabled..."
-    if ! grep -q "^PubkeyAuthentication yes" /etc/ssh/sshd_config; then
-        sudo sed -i 's/^#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-    fi
-
-    echo "[SSH 5/6] Setting up ~/.ssh directory and authorized_keys..."
-    mkdir -p "$SSH_DIR"
-    touch "$AUTH_KEYS"
-    chmod 700 "$SSH_DIR"
-    chmod 600 "$AUTH_KEYS"
-    chown -R "$USERNAME:$USERNAME" "$SSH_DIR"
-
-    echo "[SSH 6/6] Restarting SSH to apply config..."
-    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
-        sudo systemctl restart ssh
-    else
-        sudo service ssh restart 2>/dev/null || (sudo pkill sshd; sudo sshd)
-    fi
-
-    if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
-        echo "      ufw detected — allowing SSH..."
-        sudo ufw allow ssh
-    fi
-
-    echo ""
-    echo "SSH server is running on port 22."
-    echo "From your client, run:"
-    echo "  ssh-copy-id ${USERNAME}@$(hostname -I | awk '{print $1}')"
-    echo "  ssh ${USERNAME}@$(hostname -I | awk '{print $1}')"
+if command -v sshd &>/dev/null && (systemctl is-active ssh &>/dev/null 2>&1 || pgrep sshd &>/dev/null); then
+    echo "SSH server already running, skipping."
 else
-    echo "Skipping SSH server setup."
+    read -rp "Set up SSH server? (Y/n): " ssh_answer
+    ssh_answer="${ssh_answer:-Y}"
+
+    if [[ "$ssh_answer" =~ ^[Yy]$ ]]; then
+        USERNAME="${SUDO_USER:-${USER:-$(logname 2>/dev/null || whoami)}}"
+        if [ "$USERNAME" = "root" ]; then
+            echo "ERROR: Cannot detect target user. Run via sudo from your user account."
+            exit 1
+        fi
+
+        SSH_DIR="/home/$USERNAME/.ssh"
+        AUTH_KEYS="$SSH_DIR/authorized_keys"
+
+        echo ""
+        echo "[SSH 1/6] Installing openssh-server..."
+        if ! command -v sshd &>/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y openssh-server
+        else
+            echo "      openssh-server already installed, skipping."
+        fi
+
+        echo "[SSH 2/6] Enabling and starting SSH service..."
+        if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
+            sudo systemctl enable ssh
+            sudo systemctl start ssh
+        else
+            sudo service ssh start 2>/dev/null || sudo sshd &
+        fi
+
+        echo "[SSH 3/6] Ensuring PasswordAuthentication is enabled..."
+        CLOUDINIT_CONF="/etc/ssh/sshd_config.d/50-cloud-init.conf"
+        if [ -f "$CLOUDINIT_CONF" ]; then
+            sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' "$CLOUDINIT_CONF"
+        fi
+        grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || \
+            sudo sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication yes' /etc/ssh/sshd_config
+
+        echo "[SSH 4/6] Ensuring PubkeyAuthentication is enabled..."
+        if ! grep -q "^PubkeyAuthentication yes" /etc/ssh/sshd_config; then
+            sudo sed -i 's/^#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+        fi
+
+        echo "[SSH 5/6] Setting up ~/.ssh directory and authorized_keys..."
+        mkdir -p "$SSH_DIR"
+        touch "$AUTH_KEYS"
+        chmod 700 "$SSH_DIR"
+        chmod 600 "$AUTH_KEYS"
+        chown -R "$USERNAME:$USERNAME" "$SSH_DIR"
+
+        echo "[SSH 6/6] Restarting SSH to apply config..."
+        if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
+            sudo systemctl restart ssh
+        else
+            sudo service ssh restart 2>/dev/null || (sudo pkill sshd; sudo sshd)
+        fi
+
+        if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+            echo "      ufw detected — allowing SSH..."
+            sudo ufw allow ssh
+        fi
+
+        echo ""
+        echo "SSH server is running on port 22."
+        echo "From your client, run:"
+        echo "  ssh-copy-id ${USERNAME}@$(hostname -I | awk '{print $1}')"
+        echo "  ssh ${USERNAME}@$(hostname -I | awk '{print $1}')"
+    else
+        echo "Skipping SSH server setup."
+    fi
 fi
 
 echo ""
