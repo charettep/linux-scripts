@@ -241,7 +241,7 @@ else
             echo "              User already in nordvpn group, skipping."
         fi
 
-        echo "[NordVPN 5/6] Starting nordvpnd daemon..."
+        echo "[NordVPN 5/8] Starting nordvpnd daemon..."
         if ! pgrep nordvpnd &>/dev/null; then
             sudo nordvpnd &
             sleep 3
@@ -250,9 +250,7 @@ else
             echo "              Daemon already running, skipping."
         fi
 
-        echo "[NordVPN 6/6] Fixing socket permissions..."
-        # On Android Linux VMs the socket is created as root:root — fix it
-        # so nordvpn group members can connect without sudo
+        echo "[NordVPN 6/8] Fixing socket permissions..."
         if [ -S /run/nordvpn/nordvpnd.sock ]; then
             sudo chown root:nordvpn /run/nordvpn/nordvpnd.sock
             sudo chmod 660 /run/nordvpn/nordvpnd.sock
@@ -266,10 +264,25 @@ else
             echo "              udev rule added for persistent socket permissions."
         fi
 
+        echo "[NordVPN 7/8] Logging in..."
+        if [ -n "${NORDVPN_TOKEN:-}" ]; then
+            sudo -u "$USER" bash -c "nordvpn login --token $NORDVPN_TOKEN"
+            echo "              Logged in."
+        else
+            echo "              \$NORDVPN_TOKEN not set — skipping login."
+            echo "              To log in manually: nordvpn login --token YOUR_TOKEN_HERE"
+        fi
+
+        echo "[NordVPN 8/8] Enabling meshnet..."
+        if [ -n "${NORDVPN_TOKEN:-}" ]; then
+            sudo -u "$USER" bash -c "nordvpn set meshnet on"
+            echo "              Meshnet enabled."
+        else
+            echo "              Skipping (not logged in)."
+        fi
+
         echo ""
-        echo "NordVPN ready. To log in (open a new shell first, or use sudo -u $USER bash -c):"
-        echo "  nordvpn login --token YOUR_TOKEN_HERE"
-        echo ""
+        echo "NordVPN setup complete."
         echo "NOTE: nordvpn group will be active in new shell sessions."
         echo "      To activate it now without logging out, run: newgrp nordvpn"
     else
