@@ -119,8 +119,8 @@ if [[ "$nordvpn_answer" =~ ^[Yy]$ ]]; then
     echo "NordVPN ready. To log in:"
     echo "  nordvpn login --token YOUR_TOKEN_HERE"
     echo ""
-    echo "Activating nordvpn group for current session..."
-    exec newgrp nordvpn
+    echo "NOTE: nordvpn group will be active in new shell sessions."
+    echo "      To activate it now without logging out, run: newgrp nordvpn"
 else
     echo "Skipping NordVPN."
 fi
