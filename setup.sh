@@ -87,23 +87,34 @@ echo "[9/16] Installing latest Node.js via nvm..."
 nvm install node
 wait
 
-echo "[10/16] Creating keyrings directory..."
-sudo mkdir -p --mode=0755 /usr/share/keyrings
-wait
+if command -v cloudflared &>/dev/null; then
+    echo "[10-13/16] cloudflared already installed, skipping."
+else
+    read -rp "Install cloudflared? (Y/n): " cloudflared_answer
+    cloudflared_answer="${cloudflared_answer:-Y}"
 
-echo "[11/16] Adding Cloudflare GPG key..."
-curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-wait
+    if [[ "$cloudflared_answer" =~ ^[Yy]$ ]]; then
+        echo "[10/16] Creating keyrings directory..."
+        sudo mkdir -p --mode=0755 /usr/share/keyrings
+        wait
 
-echo "[12/16] Adding Cloudflare apt repository..."
-echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
-wait
+        echo "[11/16] Adding Cloudflare GPG key..."
+        curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+        wait
 
-echo "[13/16] Installing cloudflared..."
-sudo apt-get update
-wait
-sudo apt-get install -y cloudflared
-wait
+        echo "[12/16] Adding Cloudflare apt repository..."
+        echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
+        wait
+
+        echo "[13/16] Installing cloudflared..."
+        sudo apt-get update
+        wait
+        sudo apt-get install -y cloudflared
+        wait
+    else
+        echo "Skipping cloudflared."
+    fi
+fi
 
 echo "[14/16] Installing Claude Code..."
 curl -fsSL https://claude.ai/install.sh | bash
