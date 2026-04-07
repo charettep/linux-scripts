@@ -386,12 +386,10 @@ if [[ "$ssh_answer" =~ ^[Yy]$ ]]; then
         sudo sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
 
     echo "[SSH 5/7] Setting up ~/.ssh directory and authorized_keys..."
-    mkdir -p "$SSH_DIR"
-    touch "$AUTH_KEYS"
-    chmod 700 "$SSH_DIR"
-    chmod 600 "$AUTH_KEYS"
-    USER_GROUP=$(id -gn "$USERNAME" 2>/dev/null || echo "$USERNAME")
-    chown -R "$USERNAME:$USER_GROUP" "$SSH_DIR"
+    sudo -u "$USERNAME" mkdir -p "$SSH_DIR"
+    sudo -u "$USERNAME" touch "$AUTH_KEYS"
+    sudo -u "$USERNAME" chmod 700 "$SSH_DIR"
+    sudo -u "$USERNAME" chmod 600 "$AUTH_KEYS"
 
     echo "[SSH 6/7] Restarting SSH to apply config..."
     if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
