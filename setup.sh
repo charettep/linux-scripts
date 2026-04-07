@@ -293,76 +293,89 @@ fi
 # ─── SSH Server (optional) ────────────────────────────────────────────────────
 
 echo ""
-if command -v sshd &>/dev/null && (systemctl is-active ssh &>/dev/null 2>&1 || pgrep sshd &>/dev/null); then
-    echo "SSH server already running, skipping."
-else
-    read -rp "Set up SSH server? (Y/n): " ssh_answer </dev/tty
-    ssh_answer="${ssh_answer:-Y}"
+read -rp "Set up SSH server? (Y/n): " ssh_answer </dev/tty
+ssh_answer="${ssh_answer:-Y}"
 
-    if [[ "$ssh_answer" =~ ^[Yy]$ ]]; then
-        USERNAME="${SUDO_USER:-${USER:-$(logname 2>/dev/null || whoami)}}"
-        if [ "$USERNAME" = "root" ]; then
-            echo "ERROR: Cannot detect target user. Run via sudo from your user account."
-            exit 1
-        fi
+if [[ "$ssh_answer" =~ ^[Yy]$ ]]; then
+    USERNAME="${SUDO_USER:-${USER:-$(logname 2>/dev/null || whoami)}}"
+    if [ "$USERNAME" = "root" ]; then
+        echo "ERROR: Cannot detect target user. Run via sudo from your user account."
+        exit 1
+    fi
 
-        SSH_DIR="/home/$USERNAME/.ssh"
-        AUTH_KEYS="$SSH_DIR/authorized_keys"
+    SSH_DIR="/home/$USERNAME/.ssh"
+    AUTH_KEYS="$SSH_DIR/authorized_keys"
+    HOST_IP=$(hostname -I | awk '{print $1}')
+    SSH_PORT=22
 
-        echo ""
-        echo "[SSH 1/6] Installing openssh-server..."
-        if ! command -v sshd &>/dev/null; then
-            sudo apt-get update -qq
-            sudo apt-get install -y openssh-server
-        else
-            echo "      openssh-server already installed, skipping."
-        fi
+    echo ""
+    echo "[SSH 1/7] Installing openssh-server..."
+    if ! command -v sshd &>/dev/null; then
+        sudo apt-get update -qq
+        sudo apt-get install -y openssh-server
+    else
+        echo "      openssh-server already installed, skipping."
+    fi
 
-        echo "[SSH 2/6] Enabling and starting SSH service..."
-        if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
-            sudo systemctl enable ssh
-            sudo systemctl start ssh
-        else
-            sudo service ssh start 2>/dev/null || sudo sshd &
-        fi
+    echo "[SSH 2/7] Enabling and starting SSH service..."
+    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
+        sudo systemctl enable ssh
+        sudo systemctl start ssh
+    else
+        sudo service ssh start 2>/dev/null || sudo sshd &
+    fi
 
-        echo "[SSH 3/6] Ensuring PasswordAuthentication is enabled..."
-        CLOUDINIT_CONF="/etc/ssh/sshd_config.d/50-cloud-init.conf"
-        if [ -f "$CLOUDINIT_CONF" ]; then
-            sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' "$CLOUDINIT_CONF"
-        fi
-        grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || \
-            sudo sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication yes' /etc/ssh/sshd_config
+    echo "[SSH 3/7] Ensuring PasswordAuthentication is enabled..."
+    CLOUDINIT_CONF="/etc/ssh/sshd_config.d/50-cloud-init.conf"
+    if [ -f "$CLOUDINIT_CONF" ]; then
+        sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' "$CLOUDINIT_CONF"
+    fi
+    grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || \
+        sudo sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication yes' /etc/ssh/sshd_config
 
-        echo "[SSH 4/6] Ensuring PubkeyAuthentication is enabled..."
-        if ! grep -q "^PubkeyAuthentication yes" /etc/ssh/sshd_config; then
-            sudo sed -i 's/^#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-        fi
+    echo "[SSH 4/7] Ensuring PubkeyAuthentication is enabled..."
+    grep -q "^PubkeyAuthentication yes" /etc/ssh/sshd_config || \
+        sudo sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
 
-        echo "[SSH 5/6] Setting up ~/.ssh directory and authorized_keys..."
-        mkdir -p "$SSH_DIR"
-        touch "$AUTH_KEYS"
-        chmod 700 "$SSH_DIR"
-        chmod 600 "$AUTH_KEYS"
-        chown -R "$USERNAME:$USERNAME" "$SSH_DIR"
+    echo "[SSH 5/7] Setting up ~/.ssh directory and authorized_keys..."
+    mkdir -p "$SSH_DIR"
+    touch "$AUTH_KEYS"
+    chmod 700 "$SSH_DIR"
+    chmod 600 "$AUTH_KEYS"
+    chown -R "$USERNAME:$USERNAME" "$SSH_DIR"
 
-        echo "[SSH 6/6] Restarting SSH to apply config..."
-        if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
-            sudo systemctl restart ssh
-        else
-            sudo service ssh restart 2>/dev/null || (sudo pkill sshd; sudo sshd)
-        fi
+    echo "[SSH 6/7] Restarting SSH to apply config..."
+    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
+        sudo systemctl restart ssh
+    else
+        sudo service ssh restart 2>/dev/null || (sudo pkill sshd 2>/dev/null; sudo sshd)
+    fi
 
-        if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
-            echo "      ufw detected — allowing SSH..."
-            sudo ufw allow ssh
-        fi
+    echo "[SSH 7/7] Checking firewall..."
+    if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+        sudo ufw allow ssh
+        echo "      ufw: SSH allowed."
+    else
+        echo "      ufw inactive, skipping."
+    fi
 
-        echo ""
-        echo "SSH server is running on port 22."
-        echo "From your client, run:"
-        echo "  ssh-copy-id ${USERNAME}@$(hostname -I | awk '{print $1}')"
-        echo "  ssh ${USERNAME}@$(hostname -I | awk '{print $1}')"
+    # ── Client instructions ───────────────────────────────────────────────────
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║              SSH SERVER IS READY — port $SSH_PORT                  ║"
+    echo "╠══════════════════════════════════════════════════════════════╣"
+    echo "║                                                              ║"
+    echo "║  Step 1 — Generate a key on your CLIENT (if you don't       ║"
+    echo "║  have one yet):                                              ║"
+    echo "║    ssh-keygen -t ed25519 -C \"your@email.com\"                ║"
+    echo "║                                                              ║"
+    echo "║  Step 2 — Copy your key to this machine:                    ║"
+    echo "║    ssh-copy-id -p $SSH_PORT ${USERNAME}@${HOST_IP}          ║"
+    echo "║                                                              ║"
+    echo "║  Step 3 — Connect:                                          ║"
+    echo "║    ssh -p $SSH_PORT ${USERNAME}@${HOST_IP}                  ║"
+    echo "║                                                              ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
     else
         echo "Skipping SSH server setup."
     fi
