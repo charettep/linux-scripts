@@ -47,6 +47,22 @@ EOF
     echo ""
 fi
 
+# ─── Pre-flight: Remove stale/unverifiable apt sources ───────────────────────
+
+echo "Checking for stale apt sources..."
+
+# NordVPN repo: remove if source list exists but keyring is missing or unreadable
+if [ -f /etc/apt/sources.list.d/nordvpn.list ]; then
+    if ! gpg --no-default-keyring \
+             --keyring /usr/share/keyrings/nordvpn-keyring.gpg \
+             --list-keys &>/dev/null 2>&1; then
+        echo "  Stale NordVPN apt source detected (GPG key missing) — removing..."
+        sudo rm -f /etc/apt/sources.list.d/nordvpn.list
+        sudo rm -f /usr/share/keyrings/nordvpn-keyring.gpg
+        echo "  Removed. NordVPN will be re-added cleanly if selected later."
+    fi
+fi
+
 # ─── Core Setup ───────────────────────────────────────────────────────────────
 
 echo "[1/16] apt update..."
