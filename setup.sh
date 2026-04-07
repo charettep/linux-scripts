@@ -3,6 +3,50 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# ─── Android Linux VM Detection & Fixes ──────────────────────────────────────
+
+is_android_vm() {
+    # Detect Android Linux VM (e.g. AVF/crosvm on Pixel devices)
+    grep -qi "android" /proc/version 2>/dev/null && return 0
+    [ -f /system/build.prop ] && return 0
+    command -v getprop &>/dev/null && return 0
+    [ -n "${ANDROID_ROOT:-}" ] || [ -n "${ANDROID_DATA:-}" ] && return 0
+    return 1
+}
+
+if is_android_vm; then
+    echo ""
+    echo "Android Linux VM detected — applying network fixes..."
+
+    echo "  [android 1/3] Switching to iptables-legacy..."
+    sudo apt-get install -y -q iptables
+    if update-alternatives --list iptables 2>/dev/null | grep -q legacy; then
+        sudo update-alternatives --set iptables /usr/sbin/iptables-legacy
+        sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
+        echo "                iptables-legacy set."
+    else
+        echo "                iptables-legacy not available, skipping."
+    fi
+
+    echo "  [android 2/3] Disabling IPv6 persistently..."
+    sudo tee /etc/sysctl.d/99-disable-ipv6.conf > /dev/null <<'EOF'
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+EOF
+    sudo sysctl --system -q
+    echo "                IPv6 disabled."
+
+    echo "  [android 3/3] Enforcing IPv4 only in apt..."
+    sudo tee /etc/apt/apt.conf.d/99force-ipv4 > /dev/null <<'EOF'
+Acquire::ForceIPv4 "true";
+EOF
+    echo "                apt forced to IPv4."
+
+    echo "Android VM fixes applied."
+    echo ""
+fi
+
 # ─── Core Setup ───────────────────────────────────────────────────────────────
 
 echo "[1/16] apt update..."
