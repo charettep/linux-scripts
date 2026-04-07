@@ -390,7 +390,8 @@ if [[ "$ssh_answer" =~ ^[Yy]$ ]]; then
     touch "$AUTH_KEYS"
     chmod 700 "$SSH_DIR"
     chmod 600 "$AUTH_KEYS"
-    chown -R "$USERNAME:$USERNAME" "$SSH_DIR"
+    USER_GROUP=$(id -gn "$USERNAME" 2>/dev/null || echo "$USERNAME")
+    chown -R "$USERNAME:$USER_GROUP" "$SSH_DIR"
 
     echo "[SSH 6/7] Restarting SSH to apply config..."
     if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
