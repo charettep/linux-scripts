@@ -59,4 +59,17 @@ wait
 sudo apt-get install -y cloudflared
 wait
 
-echo "[13/13] Done."
+echo "[14/14] Installing Claude Code..."
+curl -fsSL https://claude.ai/install.sh | bash
+wait
+
+echo "[15/15] Adding ~/.local/bin to PATH..."
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+export PATH="$HOME/.local/bin:$PATH"
+wait
+
+echo "[16/16] Installing Codex CLI..."
+npm i -g @openai/codex
+wait
+
+echo "[16/16] Done."
