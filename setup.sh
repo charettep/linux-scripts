@@ -13,6 +13,17 @@ is_android_vm() {
     return 1
 }
 
+is_wsl() {
+    grep -qi "microsoft\|wsl" /proc/version 2>/dev/null && return 0
+    [ -f /proc/sys/fs/binfmt_misc/WSLInterop ] && return 0
+    return 1
+}
+
+# Checks if systemd is PID 1 (reliable on WSL2 with/without systemd enabled)
+is_systemd() {
+    [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ]
+}
+
 if is_android_vm; then
     echo ""
     echo "Android Linux VM detected — applying network fixes..."
@@ -243,7 +254,11 @@ else
 
         echo "[NordVPN 5/8] Starting nordvpnd daemon..."
         if ! pgrep nordvpnd &>/dev/null; then
-            sudo nordvpnd &
+            if is_systemd; then
+                sudo systemctl start nordvpnd
+            else
+                sudo service nordvpnd start 2>/dev/null || sudo nordvpnd &
+            fi
             sleep 3
             echo "              Daemon started."
         else
@@ -257,8 +272,10 @@ else
             echo "              Socket ownership fixed."
         fi
 
-        # Make socket fix persistent via udev rule (survives reboots)
-        if [ ! -f /etc/udev/rules.d/99-nordvpn.rules ]; then
+        # Make socket fix persistent via udev rule (survives reboots; skipped on WSL)
+        if is_wsl; then
+            echo "              WSL detected — skipping udev rule (udev not active in WSL)."
+        elif [ ! -f /etc/udev/rules.d/99-nordvpn.rules ]; then
             echo 'SUBSYSTEM=="unix", KERNEL=="nordvpnd.sock", GROUP="nordvpn", MODE="0660"' | \
                 sudo tee /etc/udev/rules.d/99-nordvpn.rules > /dev/null
             echo "              udev rule added for persistent socket permissions."
@@ -366,7 +383,7 @@ if [[ "$ssh_answer" =~ ^[Yy]$ ]]; then
     fi
 
     echo "[SSH 2/7] Enabling and starting SSH service..."
-    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
+    if is_systemd; then
         sudo systemctl enable ssh
         sudo systemctl start ssh
     else
@@ -392,7 +409,7 @@ if [[ "$ssh_answer" =~ ^[Yy]$ ]]; then
     sudo -u "$USERNAME" chmod 600 "$AUTH_KEYS"
 
     echo "[SSH 6/7] Restarting SSH to apply config..."
-    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
+    if is_systemd; then
         sudo systemctl restart ssh
     else
         sudo service ssh restart 2>/dev/null || (sudo pkill sshd 2>/dev/null; sudo sshd)
@@ -423,9 +440,19 @@ if [[ "$ssh_answer" =~ ^[Yy]$ ]]; then
     echo "║    ssh -p $SSH_PORT ${USERNAME}@${HOST_IP}                  ║"
     echo "║                                                              ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
-    else
-        echo "Skipping SSH server setup."
+    if is_wsl; then
+        WIN_GW=$(ip route show default 2>/dev/null | awk '/default/ {print $3}' | head -1)
+        echo ""
+        echo "  WSL note: $HOST_IP is your WSL internal address."
+        echo "  From Windows you can connect directly with:"
+        echo "    ssh -p $SSH_PORT ${USERNAME}@${HOST_IP}"
+        if [ -n "$WIN_GW" ]; then
+            echo "  For external access, run in PowerShell (as admin):"
+            echo "    netsh interface portproxy add v4tov4 listenport=$SSH_PORT listenaddress=0.0.0.0 connectaddress=$HOST_IP connectport=$SSH_PORT"
+        fi
     fi
+else
+    echo "Skipping SSH server setup."
 fi
 
 echo ""
