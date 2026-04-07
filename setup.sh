@@ -225,12 +225,15 @@ else
             echo "              Repository already present, skipping."
         fi
 
-        echo "[NordVPN 3/4] Installing NordVPN..."
+        echo "[NordVPN 3/6] Installing NordVPN..."
         sudo apt-get update -q
         sudo apt-get install -y nordvpn
         echo "              NordVPN installed."
 
-        echo "[NordVPN 4/4] Adding user to nordvpn group..."
+        echo "[NordVPN 4/6] Adding user to nordvpn group..."
+        if ! getent group nordvpn &>/dev/null; then
+            sudo groupadd nordvpn
+        fi
         if ! groups "$USER" | grep -q nordvpn; then
             sudo usermod -aG nordvpn "$USER"
             echo "              User added to nordvpn group."
@@ -238,8 +241,33 @@ else
             echo "              User already in nordvpn group, skipping."
         fi
 
+        echo "[NordVPN 5/6] Starting nordvpnd daemon..."
+        if ! pgrep nordvpnd &>/dev/null; then
+            sudo nordvpnd &
+            sleep 3
+            echo "              Daemon started."
+        else
+            echo "              Daemon already running, skipping."
+        fi
+
+        echo "[NordVPN 6/6] Fixing socket permissions..."
+        # On Android Linux VMs the socket is created as root:root — fix it
+        # so nordvpn group members can connect without sudo
+        if [ -S /run/nordvpn/nordvpnd.sock ]; then
+            sudo chown root:nordvpn /run/nordvpn/nordvpnd.sock
+            sudo chmod 660 /run/nordvpn/nordvpnd.sock
+            echo "              Socket ownership fixed."
+        fi
+
+        # Make socket fix persistent via udev rule (survives reboots)
+        if [ ! -f /etc/udev/rules.d/99-nordvpn.rules ]; then
+            echo 'SUBSYSTEM=="unix", KERNEL=="nordvpnd.sock", GROUP="nordvpn", MODE="0660"' | \
+                sudo tee /etc/udev/rules.d/99-nordvpn.rules > /dev/null
+            echo "              udev rule added for persistent socket permissions."
+        fi
+
         echo ""
-        echo "NordVPN ready. To log in:"
+        echo "NordVPN ready. To log in (open a new shell first, or use sudo -u $USER bash -c):"
         echo "  nordvpn login --token YOUR_TOKEN_HERE"
         echo ""
         echo "NOTE: nordvpn group will be active in new shell sessions."
